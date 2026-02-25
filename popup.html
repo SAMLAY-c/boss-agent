@@ -97,6 +97,76 @@
     </div>
   </div>
 
+  <!-- 区域4：导出管理 -->
+  <div class="card">
+    <div class="card-title">📥 批量导出管理</div>
+    <div style="font-size: 11px; color: #666; margin-bottom: 12px; line-height: 1.5;">
+      设置倒计时后，插件会自动收集并导出期间分析的职位报告
+    </div>
+
+    <!-- 倒计时选择 -->
+    <div style="margin-bottom: 12px;">
+      <label style="font-size: 12px; font-weight: 500; color: #555; margin-bottom: 6px; display: block;">倒计时时长</label>
+      <select id="exportTimer" style="width: 100%; padding: 8px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 13px; color: var(--text-primary); background: #fff;">
+        <option value="5">5 分钟（快速测试）</option>
+        <option value="10" selected>10 分钟（推荐）</option>
+        <option value="20">20 分钟（深度筛选）</option>
+      </select>
+    </div>
+
+    <!-- 操作按钮 -->
+    <div style="display: flex; gap: 8px;">
+      <button id="btn-start-timer" style="
+        flex: 1;
+        padding: 10px;
+        background: linear-gradient(135deg, #00bebd 0%, #008988 100%);
+        color: white;
+        border: none;
+        border-radius: var(--radius-sm);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        box-shadow: 0 2px 6px rgba(0, 190, 189, 0.3);
+        transition: all 0.2s;
+      ">
+        ⏱️ 开始倒计时
+      </button>
+
+      <button id="btn-stop-timer" style="
+        flex: 1;
+        padding: 10px;
+        background: #ff5252;
+        color: white;
+        border: none;
+        border-radius: var(--radius-sm);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        box-shadow: 0 2px 6px rgba(255, 82, 82, 0.3);
+        transition: all 0.2s;
+        display: none;
+      ">
+        ⏹️ 停止并导出
+      </button>
+    </div>
+
+    <!-- 倒计时显示 -->
+    <div id="timer-status" style="
+      margin-top: 12px;
+      padding: 10px;
+      background: #f8f9fa;
+      border-radius: var(--radius-sm);
+      border: 1px solid #e0e0e0;
+      font-size: 12px;
+      text-align: center;
+      color: #666;
+      display: none;
+    ">
+      <span id="timer-countdown" style="font-size: 18px; font-weight: bold; color: #00bebd;">10:00</span>
+      <div style="font-size: 11px; color: #999; margin-top: 4px;">已收集 <span id="collected-count">0</span> 份报告</div>
+    </div>
+  </div>
+
   <div class="footer-actions">
     <button id="saveBtn" class="save-btn">💾 保存所有配置</button>
     <div id="status"></div>

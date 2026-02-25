@@ -89,7 +89,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // 绑定保存按钮 (增加对高级配置的实时保存)
     document.getElementById('saveBtn').addEventListener('click', saveSettings);
     // 监听普通 checkbox
-    document.getElementById('filterActiveHr').addEventListener('change', saveSettings); 
+    document.getElementById('filterActiveHr').addEventListener('change', saveSettings);
+
+    // 绑定批量导出倒计时按钮
+    document.getElementById('btn-start-timer').addEventListener('click', startExportTimer);
+    document.getElementById('btn-stop-timer').addEventListener('click', () => stopExportTimer(false)); 
     
     // 监听实验室模式
     document.getElementById('enableLabMode').addEventListener('change', (e) => {
@@ -745,4 +749,133 @@ function showStatus(msg, color) {
     el.innerText = msg;
     el.style.color = color;
     setTimeout(() => { el.innerText = ''; el.style.color = 'var(--text-primary)'; }, 3000);
+}
+
+// ================= 批量导出倒计时功能 =================
+
+// 全局变量
+let exportTimer = null;
+let exportTimerInterval = null;
+let collectedReports = [];
+let timerSeconds = 0;
+
+// 开始倒计时
+function startExportTimer() {
+    const timerSelect = document.getElementById('exportTimer');
+    const minutes = parseInt(timerSelect.value);
+    timerSeconds = minutes * 60;
+
+    // 更新UI
+    document.getElementById('btn-start-timer').style.display = 'none';
+    document.getElementById('btn-stop-timer').style.display = 'inline-block';
+    document.getElementById('timer-status').style.display = 'block';
+
+    // 清空之前的收集数据
+    collectedReports = [];
+
+    // 启动倒计时
+    updateTimerDisplay();
+    exportTimerInterval = setInterval(() => {
+        timerSeconds--;
+        updateTimerDisplay();
+
+        if (timerSeconds <= 0) {
+            stopExportTimer(true);
+        }
+    }, 1000);
+
+    // 监听content script的消息，收集分析报告
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message.action === 'reportGenerated' && message.data) {
+            collectedReports.push(message.data);
+            updateCollectedCount();
+        }
+    });
+
+    showStatus(`⏱️ 倒计时已启动：${minutes}分钟`, '#00bebd');
+}
+
+// 停止倒计时并导出
+function stopExportTimer(autoExport = false) {
+    clearInterval(exportTimerInterval);
+
+    // 更新UI
+    document.getElementById('btn-start-timer').style.display = 'inline-block';
+    document.getElementById('btn-stop-timer').style.display = 'none';
+
+    if (autoExport) {
+        // 自动导出
+        exportCollectedReports();
+        showStatus(`✅ 倒计时结束，已导出 ${collectedReports.length} 份报告`, '#4CAF50');
+    } else {
+        // 手动停止，询问是否导出
+        if (collectedReports.length > 0) {
+            const confirmExport = confirm(`已收集 ${collectedReports.length} 份报告，是否立即导出？`);
+            if (confirmExport) {
+                exportCollectedReports();
+            }
+        } else {
+            showStatus('⚠️ 还没有收集到报告', '#ff9800');
+        }
+    }
+
+    // 重置倒计时显示
+    document.getElementById('timer-status').style.display = 'none';
+}
+
+// 更新倒计时显示
+function updateTimerDisplay() {
+    const minutes = Math.floor(timerSeconds / 60);
+    const seconds = timerSeconds % 60;
+    const display = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    document.getElementById('timer-countdown').innerText = display;
+}
+
+// 更新收集数量
+function updateCollectedCount() {
+    document.getElementById('collected-count').innerText = collectedReports.length;
+}
+
+// 导出收集的报告
+function exportCollectedReports() {
+    if (collectedReports.length === 0) {
+        showStatus('⚠️ 没有可导出的报告', '#ff9800');
+        return;
+    }
+
+    // 构建导出数据
+    const exportData = {
+        meta: {
+            exportTime: new Date().toISOString(),
+            exportTimeFormatted: new Date().toLocaleString('zh-CN'),
+            pluginVersion: '3.1.0',
+            pluginName: '微光·求职搭子',
+            totalReports: collectedReports.length
+        },
+        reports: collectedReports
+    };
+
+    // 转换为JSON
+    const jsonString = JSON.stringify(exportData, null, 2);
+
+    // 生成文件名
+    const timestamp = new Date().getTime();
+    const filename = `微光批量导出_${collectedReports.length}份_${timestamp}.json`;
+
+    // 创建下载
+    const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.style.display = 'none';
+
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    // 清空收集
+    collectedReports = [];
+    updateCollectedCount();
 }
