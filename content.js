@@ -3725,14 +3725,33 @@ function exportReportToJSON(jobData, aiData) {
 // ================= 报告渲染 =================
 
 function renderFullReport(jobData, aiData) {
+    console.log('═════════════════════════════════════════════════════');
+    console.log('🎨 [renderFullReport] 开始渲染报告');
+    console.log('📊 [JobData]', {
+        title: jobData.detailTitle,
+        salary: jobData.salary,
+        company: jobData.company,
+        hasParsed: !!jobData.parsed
+    });
+    console.log('🤖 [AIData]', {
+        score: aiData.summary?.score || aiData.score,
+        matchStatus: aiData.summary?.match_status,
+        riskLevel: aiData.risk_assessment?.level
+    });
+
     // Cache the latest analysis for one-click greeting
     window.lastGlimmerData = { jobData, aiData };
 
     // 保存到历史记录
     const jobId = getJobId(window.location.href) || (jobData.link ? getJobId(jobData.link) : null);
+    console.log(`🔍 [JobID] 提取结果: ${jobId}`);
+
     if (jobId && HistoryManager) {
+        console.log('💾 [History] 开始保存到历史记录...');
         HistoryManager.saveAnalysis(jobId, jobData, aiData);
-        console.log(`💾 [History] 报告已保存到历史记录: ${jobId}`);
+        console.log(`✅ [History] 报告已保存: ${jobId}`);
+    } else {
+        console.warn('⚠️ [History] 保存失败:', { jobId, hasHistoryManager: !!HistoryManager });
     }
 
     const autoApplyBtn = document.getElementById('btn-auto-apply');
@@ -5631,20 +5650,32 @@ const HistoryManager = {
 
     // 添加记录 (保存 Index 和 Detail)
     saveAnalysis(jobId, jobData, aiData) {
-        if (!jobId) return;
-        
+        if (!jobId) {
+            console.warn('⚠️ [History.saveAnalysis] jobId 为空，无法保存');
+            return;
+        }
+
+        console.log('📝 [History.saveAnalysis] 开始保存分析报告');
+        console.log('  ├─ jobId:', jobId);
+        console.log('  ├─ 职位:', jobData.detailTitle);
+        console.log('  ├─ 公司:', jobData.company);
+        console.log('  └─ 分数:', aiData.summary?.score || aiData.score || 0);
+
         // 1. 更新 Index
         // 兼容 DeepSeek 的嵌套结构 (aiData.summary.score)
         const score = aiData.summary ? aiData.summary.score : (aiData.score || 0);
         const verdict = aiData.summary ? aiData.summary.match_level : (aiData.verdict || "");
-        
-        this.cache.set(jobId, {
+
+        const indexData = {
             t: Date.now(),
             st: 1, // 1:analyzed
             s: score,
             v: verdict
-        });
+        };
+
+        this.cache.set(jobId, indexData);
         this.save();
+        console.log('✅ [History] Index 已保存:', indexData);
 
         // 2. 保存 Detail (使用 unlimitedStorage)
         const key = `job_cache_${jobId}`;
@@ -5661,8 +5692,17 @@ const HistoryManager = {
             updateTime: Date.now(), // Schema 要求
             version: "1.0" // Schema 要求
         };
+
+        const dataSize = Math.round(JSON.stringify(detailData).length / 1024);
+        console.log(`💾 [History] Detail 准备保存: ${key} (${dataSize}KB)`);
+
         chrome.storage.local.set({ [key]: detailData }, () => {
-             console.log(`💾 [History] 详情已缓存: ${key} (${Math.round(JSON.stringify(detailData).length/1024)}KB)`);
+            if (chrome.runtime.lastError) {
+                console.error('❌ [History] Detail 保存失败:', chrome.runtime.lastError);
+            } else {
+                console.log(`✅ [History] Detail 已保存: ${key} (${dataSize}KB)`);
+                console.log('  └─ 存储键总数:', Object.keys(this.cache).size);
+            }
         });
     },
 

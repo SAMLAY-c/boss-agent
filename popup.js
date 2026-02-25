@@ -754,9 +754,19 @@ function showStatus(msg, color) {
 
 // 导出指定时间范围内的历史报告
 function exportHistoryReports() {
+    console.log('═════════════════════════════════════════════════════');
+    console.log('📥 [exportHistoryReports] 开始导出历史报告');
+
     const timeRangeSelect = document.getElementById('exportTimeRange');
     const minutes = parseInt(timeRangeSelect.value);
     const statusDiv = document.getElementById('export-status');
+
+    console.log('⏱️  [TimeRange] 选择的时间范围:', minutes, '分钟');
+    console.log('📅 [TimeWindow]', {
+        now: new Date().toLocaleString('zh-CN'),
+        rangeMinutes: minutes,
+        startTime: new Date(Date.now() - minutes * 60 * 1000).toLocaleString('zh-CN')
+    });
 
     // 显示状态
     statusDiv.style.display = 'block';
@@ -767,14 +777,36 @@ function exportHistoryReports() {
     const timeRange = minutes * 60 * 1000; // 转换为毫秒
     const startTime = now - timeRange;
 
+    console.log('🔍 [Storage] 开始从 chrome.storage.local 读取数据...');
+
     // 从chrome.storage读取历史记录
     chrome.storage.local.get(['jobHistory'], (result) => {
+        console.log('📦 [Storage] 数据读取完成');
+        console.log('  ├─ jobHistory 存在:', !!result.jobHistory);
+
         const jobHistoryObj = result.jobHistory || {};
+        const totalCount = Object.keys(jobHistoryObj).length;
+        console.log('  └─ 历史记录总数:', totalCount);
+
+        if (totalCount === 0) {
+            console.warn('⚠️ [History] 历史记录为空，请先分析一些职位');
+            statusDiv.innerText = '⚠️ 还没有历史记录';
+            statusDiv.style.color = '#ff9800';
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 3000);
+            return;
+        }
 
         // 转换为数组并过滤时间范围
+        console.log(`🔍 [Filter] 过滤时间范围: ${startTime} ~ ${now}`);
         const filteredJobs = Object.entries(jobHistoryObj)
             .filter(([jobId, record]) => {
-                return record.t >= startTime && record.t <= now;
+                const inRange = record.t >= startTime && record.t <= now;
+                if (!inRange) {
+                    console.log(`  ⊗ ${jobId}: ${new Date(record.t).toLocaleString('zh-CN')} (超出范围)`);
+                }
+                return inRange;
             })
             .map(([jobId, record]) => ({
                 jobId,
@@ -783,7 +815,13 @@ function exportHistoryReports() {
                 verdict: record.v
             }));
 
+        console.log(`✅ [Filter] 过滤完成，找到 ${filteredJobs.length} 条符合条件的记录:`);
+        filteredJobs.forEach(job => {
+            console.log(`  ✓ ${job.jobId}: ${new Date(job.timestamp).toLocaleString('zh-CN')} | 分数: ${job.score} | ${job.verdict}`);
+        });
+
         if (filteredJobs.length === 0) {
+            console.warn(`⚠️ [Filter] 最近 ${minutes} 分钟内没有分析记录`);
             statusDiv.innerText = `⚠️ 最近 ${minutes} 分钟内没有分析记录`;
             statusDiv.style.color = '#ff9800';
             setTimeout(() => {
@@ -794,13 +832,21 @@ function exportHistoryReports() {
 
         // 现在需要获取详细信息
         const detailKeys = filteredJobs.map(job => `job_cache_${job.jobId}`);
+        console.log(`🔍 [Details] 准备读取 ${detailKeys.length} 条详细信息...`);
+        console.log('  Keys:', detailKeys);
 
         chrome.storage.local.get(detailKeys, (result) => {
+            console.log('📦 [Details] 详情数据读取完成');
+
             const reports = [];
+            let successCount = 0;
+            let failedCount = 0;
 
             filteredJobs.forEach(job => {
                 const detail = result[`job_cache_${job.jobId}`];
                 if (detail && detail.jobData && detail.aiData) {
+                    successCount++;
+                    console.log(`  ✓ ${job.jobId}: ${detail.jobData.detailTitle} - ${detail.jobData.company}`);
                     reports.push({
                         jobData: {
                             title: detail.jobData.detailTitle,
@@ -816,10 +862,16 @@ function exportHistoryReports() {
                             summary: detail.aiData.summary?.verdict || ''
                         }
                     });
+                } else {
+                    failedCount++;
+                    console.warn(`  ✗ ${job.jobId}: 详情缺失或无效`);
                 }
             });
 
+            console.log(`📊 [Details] 详情汇总: 成功 ${successCount} | 失败 ${failedCount} | 总计 ${reports.length}`);
+
             if (reports.length === 0) {
+                console.warn('⚠️ [Export] 没有有效的报告数据');
                 statusDiv.innerText = `⚠️ 未找到详细信息`;
                 statusDiv.style.color = '#ff9800';
                 setTimeout(() => {
@@ -829,6 +881,7 @@ function exportHistoryReports() {
             }
 
             // 构建导出数据
+            console.log('📦 [Export] 开始构建导出数据...');
             const exportData = {
                 meta: {
                     exportTime: new Date().toISOString(),
@@ -845,13 +898,17 @@ function exportHistoryReports() {
 
             // 转换为JSON
             const jsonString = JSON.stringify(exportData, null, 2);
+            const fileSize = Math.round(jsonString.length / 1024);
+            console.log(`✅ [Export] JSON 构建完成: ${fileSize}KB`);
 
             // 生成文件名
             const timestamp = now;
             const timeRangeText = minutes >= 1440 ? '今天' : `${minutes}分钟`;
             const filename = `微光历史报告_${timeRangeText}_${reports.length}份_${timestamp}.json`;
+            console.log(`📄 [Export] 文件名: ${filename}`);
 
             // 创建下载
+            console.log('⬇️  [Export] 开始下载...');
             const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
@@ -863,6 +920,9 @@ function exportHistoryReports() {
             link.click();
             document.body.removeChild(link);
             URL.revokeObjectURL(url);
+
+            console.log('✅ [Export] 下载完成！');
+            console.log('═════════════════════════════════════════════════════');
 
             // 显示成功状态
             statusDiv.innerHTML = `✅ 已导出 <strong>${reports.length}</strong> 份报告<br><span style="font-size: 10px; color: #999;">时间范围：${timeRangeText}</span>`;
