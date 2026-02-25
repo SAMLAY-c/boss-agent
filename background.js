@@ -4,6 +4,8 @@ console.log("🚀 微光·求职搭子: Background Service Started");
 
 // 腾讯云 Serverless 代理地址 (请替换为实际部署地址)
 const SERVERLESS_URL = "https://1254102186-4c0oxqya5x.ap-guangzhou.tencentscf.com";
+const SILICONFLOW_CHAT_URL = "https://api.siliconflow.cn/v1/chat/completions";
+const SILICONFLOW_DEFAULT_MODEL = "deepseek-ai/DeepSeek-V3.2";
 
 // 默认系统提示词 (用于职位分析)
 const DEFAULT_SYSTEM_PROMPT = `你是一名【站在我（求职者）这边的资深职业顾问】。
@@ -491,6 +493,28 @@ async function handleRedeemDailyKey(key, sendResponse) {
 const activeRequests = new Map();
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === "TRACE_LOG") {
+        try {
+            const source = request.source || 'Trace';
+            const step = request.step || '--';
+            const message = request.message || '';
+            const data = request.data;
+            const timestamp = request.timestamp || new Date().toLocaleTimeString();
+            const tabHint = sender && sender.tab && sender.tab.id ? ` [Tab:${sender.tab.id}]` : '';
+            const urlHint = request.url ? ` ${request.url}` : '';
+            const prefix = `[${source}][${step}]`;
+
+            if (data !== undefined && data !== null) {
+                console.log(`${timestamp} ${prefix}${tabHint} ${message}${urlHint}`, data);
+            } else {
+                console.log(`${timestamp} ${prefix}${tabHint} ${message}${urlHint}`);
+            }
+        } catch (e) {
+            console.warn('[TRACE_LOG] print failed:', e && e.message ? e.message : e);
+        }
+        return;
+    }
+
     
     // === 停止分析接口 ===
     if (request.action === "stop_analysis") {
@@ -525,7 +549,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 if (computeMode === 'custom_key') {
                     // === 模式 A: 自有 Key 直连 ===
                     if (!data.apiKey) {
-                        sendResponse({ success: false, error: "请先在插件配置中输入 DeepSeek API Key" });
+                        sendResponse({ success: false, error: "请先在插件配置中输入 SiliconFlow API Key" });
                         return;
                     }
                     await handleDirectCall(data.apiKey, data.systemPrompt, data.resume, jobText, hrName, bossTitle, sendResponse, sender.tab.id);
@@ -565,7 +589,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
                 if (computeMode === 'custom_key') {
                     if (!data.apiKey) {
-                        sendResponse({ success: false, error: "请先在插件配置中输入 DeepSeek API Key" });
+                        sendResponse({ success: false, error: "请先在插件配置中输入 SiliconFlow API Key" });
                         return;
                     }
                     await handleDirectGreetingCall(
@@ -593,7 +617,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         bossTitle,
                         sendResponse,
                         sender.tab ? sender.tab.id : null,
-                        data.userKey
+                        data.userKey,
+                        data.apiKey
                     );
                 }
             } catch (error) {
@@ -768,13 +793,14 @@ async function handleDirectConfigGen(apiKey, resume, sendResponse) {
         
         // 2. 调用 API
         const payload = {
-            model: "deepseek-chat",
+            model: SILICONFLOW_DEFAULT_MODEL,
             messages: [{ role: "user", content: prompt }],
             temperature: 1.1,
+            enable_thinking: false,
             response_format: { type: "json_object" }
         };
 
-        const response = await fetchWithRetry("https://api.deepseek.com/chat/completions", {
+        const response = await fetchWithRetry(SILICONFLOW_CHAT_URL, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -874,12 +900,13 @@ async function handleDirectCall(apiKey, systemPrompt, resume, jobText, hrName, b
     const userPrompt = constructAnalyzeUserPrompt(resume, jobText, hrName, bossTitle);
 
     const payload = {
-        model: "deepseek-chat",
+        model: SILICONFLOW_DEFAULT_MODEL,
         messages: [
             { role: "system", content: sysPrompt },
             { role: "user", content: userPrompt }
         ],
         temperature: 1.3,
+        enable_thinking: false,
         response_format: { type: "json_object" }
     };
 
@@ -890,7 +917,7 @@ async function handleDirectCall(apiKey, systemPrompt, resume, jobText, hrName, b
     }
 
     try {
-        const response = await fetchWithRetry("https://api.deepseek.com/chat/completions", {
+        const response = await fetchWithRetry(SILICONFLOW_CHAT_URL, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -903,7 +930,7 @@ async function handleDirectCall(apiKey, systemPrompt, resume, jobText, hrName, b
         const result = await response.json();
         
         if (result.error) {
-            throw new Error(`DeepSeek API Error: ${result.error.message}`);
+            throw new Error(`SiliconFlow API Error: ${result.error.message}`);
         }
 
         let content = result.choices[0].message.content;
@@ -917,7 +944,7 @@ async function handleDirectCall(apiKey, systemPrompt, resume, jobText, hrName, b
             console.log("🛑 Request Aborted by User (Direct Mode)");
             sendResponse({ success: false, error: "用户已取消" });
         } else {
-            console.error("DeepSeek API Call Failed:", error);
+            console.error("SiliconFlow API Call Failed:", error);
             sendResponse({ success: false, error: error.message });
         }
     } finally {
@@ -1008,12 +1035,13 @@ async function handleDirectGreetingCall(apiKey, chatSystemPrompt, resume, jobTex
     const userPrompt = constructGreetingUserPrompt(resume, jobText, hrName, bossTitle);
 
     const payload = {
-        model: "deepseek-chat",
+        model: SILICONFLOW_DEFAULT_MODEL,
         messages: [
             { role: "system", content: sysPrompt },
             { role: "user", content: userPrompt }
         ],
-        temperature: 1.1
+        temperature: 1.1,
+        enable_thinking: false
     };
 
     const controller = new AbortController();
@@ -1022,7 +1050,7 @@ async function handleDirectGreetingCall(apiKey, chatSystemPrompt, resume, jobTex
     }
 
     try {
-        const response = await fetchWithRetry("https://api.deepseek.com/chat/completions", {
+        const response = await fetchWithRetry(SILICONFLOW_CHAT_URL, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -1035,7 +1063,7 @@ async function handleDirectGreetingCall(apiKey, chatSystemPrompt, resume, jobTex
         const result = await response.json();
 
         if (result.error) {
-            throw new Error(`DeepSeek API Error: ${result.error.message}`);
+            throw new Error(`SiliconFlow API Error: ${result.error.message}`);
         }
 
         let content = result.choices[0].message.content || "";
@@ -1046,7 +1074,7 @@ async function handleDirectGreetingCall(apiKey, chatSystemPrompt, resume, jobTex
             console.log("🛑 Greeting Request Aborted by User (Direct Mode)");
             sendResponse({ success: false, error: "用户已取消" });
         } else {
-            console.error("DeepSeek Greeting Call Failed:", error);
+            console.error("SiliconFlow Greeting Call Failed:", error);
             sendResponse({ success: false, error: error.message });
         }
     } finally {
@@ -1057,7 +1085,7 @@ async function handleDirectGreetingCall(apiKey, chatSystemPrompt, resume, jobTex
 }
 
 // === 处理 Serverless 打招呼调用 ===
-async function handleServerlessGreetingCall(clientId, chatSystemPrompt, resume, jobText, hrName, bossTitle, sendResponse, tabId, userKey) {
+async function handleServerlessGreetingCall(clientId, chatSystemPrompt, resume, jobText, hrName, bossTitle, sendResponse, tabId, userKey, fallbackApiKey) {
     const sysPrompt = prepareChatSystemPrompt(chatSystemPrompt);
 
     if (!SERVERLESS_URL || SERVERLESS_URL.includes("service-xxxx")) {
@@ -1107,8 +1135,34 @@ async function handleServerlessGreetingCall(clientId, chatSystemPrompt, resume, 
         } else {
             console.error("❌ Serverless Greeting Call Failed:", e);
             const errorMsg = e.message || "未知错误";
-            if (/Free limit/i.test(errorMsg) || /Invalid Key/i.test(errorMsg) || /Rate limit/i.test(errorMsg)) {
+            if (/Unknown Action\s*:\s*generate_greeting/i.test(errorMsg)) {
+                if (fallbackApiKey) {
+                    console.warn("[Greeting] Serverless action missing, fallback to direct SiliconFlow");
+                    await handleDirectGreetingCall(
+                        fallbackApiKey,
+                        chatSystemPrompt,
+                        resume,
+                        jobText,
+                        hrName,
+                        bossTitle,
+                        sendResponse,
+                        tabId
+                    );
+                    return;
+                }
+                sendResponse({
+                    success: false,
+                    error: '云函数未实现 generate_greeting，且本地未配置 SiliconFlow Key'
+                });
+            } else if (/Unknown Action/i.test(errorMsg)) {
+                sendResponse({
+                    success: false,
+                    error: '云函数返回未知 action，后端路由配置不匹配'
+                });
+            } else if (/Free limit/i.test(errorMsg) || /Invalid Key/i.test(errorMsg) || /Rate limit/i.test(errorMsg)) {
                 sendResponse({ success: false, error: errorMsg });
+            } else if (/CORS|Failed to fetch|NetworkError/i.test(errorMsg)) {
+                sendResponse({ success: false, error: '网络/CORS 异常，请检查网络或代理/VPN 设置' });
             } else {
                 sendResponse({ success: false, error: "后端连接失败: " + errorMsg });
             }

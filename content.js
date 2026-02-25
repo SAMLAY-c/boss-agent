@@ -1550,10 +1550,17 @@ function getDetailData() {
 ${structuredDesc || text}
     `;
 
+    const canonicalUrl = document.querySelector('link[rel="canonical"]')?.href || window.location.href || "";
+    const normalizedSalary = (salary && /[\ue000-\uf8ff]/.test(salary))
+        ? "\u85aa\u8d44\u5df2\u52a0\u5bc6\uff08\u8bf7\u67e5\u770b\u8be6\u60c5\u9875\uff09"
+        : salary;
+
     return {
         text: fullJobText, // 替换原始文本
         detailTitle,
-        salary,
+        salary: normalizedSalary,
+        url: canonicalUrl,
+        link: canonicalUrl,
         company: companyName || "公司",
         hr: hrName || "HR",
         active: activeTime || "",
@@ -3297,7 +3304,7 @@ async function autoApplyNext() {
 
     const sendResult = await withTimeout(
         autoGreet(greetingText, { openInNewTab: true, detailUrl }),
-        12000,
+        45000,
         "auto_greet"
     );
     if (!sendResult.ok) {
@@ -3317,7 +3324,11 @@ async function autoApplyNext() {
         card.setAttribute('data-reason', '⚠️ 发送失败');
     }
 
-    await new Promise(r => setTimeout(r, 800));
+    if (sendResult.ok && sendResult.value === "pending") {
+        await new Promise(r => setTimeout(r, 6000));
+    } else {
+        await new Promise(r => setTimeout(r, 800));
+    }
     await tryReturnToList();
 
     card.classList.remove('boss-scanning');

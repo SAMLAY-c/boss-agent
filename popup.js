@@ -1,7 +1,7 @@
 // popup.js - 终极修复版 (前端交互与错误处理)
 
-// 预设 DeepSeek API Key
-const DEFAULT_API_KEY = 'sk-92c0ecec04be4940b50a6123ed34e7ac';
+// 预设 SiliconFlow API Key
+const DEFAULT_API_KEY = 'sk-itnytfacpeobkvireovadmsrbonrgemrsnfgsqvhesjtyppz';
 
 // 预设简历模板（林承列）
 const DEFAULT_RESUME = `个人简历
@@ -854,12 +854,18 @@ function exportHistoryReports() {
                 if (detail && detail.jobData && detail.aiData) {
                     successCount++;
                     console.log(`  ✓ ${job.jobId}: ${detail.jobData.detailTitle} - ${detail.jobData.company}`);
+                    const exportUrl = detail.jobData.url || detail.jobData.link || job.url || '';
+                    let exportSalary = detail.jobData.salary || job.salary || '';
+                    if (exportSalary && /[\ue000-\uf8ff]/.test(exportSalary)) {
+                        exportSalary = '\u85aa\u8d44\u5df2\u52a0\u5bc6\uff08\u8bf7\u67e5\u770b\u8be6\u60c5\u9875\uff09';
+                    }
+
                     reports.push({
                         jobData: {
                             title: detail.jobData.detailTitle,
-                            salary: detail.jobData.salary,
+                            salary: exportSalary,
                             company: detail.jobData.company,
-                            url: detail.jobData.url || window.location.href,
+                            url: exportUrl,
                             analyzedAt: new Date(detail.timestamp).toLocaleString('zh-CN')
                         },
                         aiData: {
