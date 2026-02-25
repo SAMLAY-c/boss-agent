@@ -3586,6 +3586,144 @@ function bindSmartOpenerEvents() {
     });
 }
 
+// ================= 导出功能 (Export to JSON) =================
+
+/**
+ * 导出完整分析报告为JSON文件
+ * @param {object} jobData - 职位数据
+ * @param {object} aiData - AI分析数据
+ */
+function exportReportToJSON(jobData, aiData) {
+    try {
+        // 构建完整的导出数据结构
+        const exportData = {
+            // 元数据
+            meta: {
+                exportTime: new Date().toISOString(),
+                exportTimeFormatted: new Date().toLocaleString('zh-CN'),
+                pluginVersion: "3.0.6",
+                pluginName: "微光·求职搭子",
+                url: window.location.href
+            },
+
+            // 职位基本信息
+            jobInfo: {
+                title: jobData.detailTitle || "未知职位",
+                salary: jobData.salary || "面议",
+                company: jobData.company || "未知公司",
+                companyTags: jobData.companyTags || "",
+                hrName: jobData.hr || "未知HR",
+                hrTitle: jobData.hrTitle || "",
+                activeTime: jobData.active || "",
+                jobTags: jobData.jobTags || ""
+            },
+
+            // 结构化职位描述
+            jobDescription: {
+                raw: jobData.rawDesc || "",
+                parsed: jobData.parsed || {
+                    responsibilities: [],
+                    requirements: [],
+                    plusPoints: [],
+                    aboutUs: "",
+                    other: ""
+                }
+            },
+
+            // AI分析结果
+            aiAnalysis: {
+                // 匹配度
+                summary: {
+                    score: aiData.summary?.score || aiData.score || 0,
+                    matchStatus: aiData.summary?.match_status || "未知",
+                    verdict: aiData.summary?.verdict || "",
+                    reason: aiData.summary?.reason || ""
+                },
+
+                // 风险评估
+                riskAssessment: {
+                    level: aiData.risk_assessment?.level || "SAFE",
+                    riskScore: aiData.risk_assessment?.risk_score || 0,
+                    analysis: aiData.risk_assessment?.analysis || "",
+                    riskLabels: aiData.risk_assessment?.risk_labels || []
+                },
+
+                // 雷达图数据
+                radarChart: aiData.radar_values || aiData.radar_chart || null,
+
+                // 招聘动机
+                hiringMotive: aiData.hiring_motive || null,
+
+                // 连接桥梁
+                connectionBridge: aiData.connection_bridge || null,
+
+                // 可迁移性
+                transferability: aiData.transferability || null,
+
+                // JD质量
+                jdQuality: aiData.jd_quality || null,
+
+                // 未来展望
+                futureScope: aiData.future_scope || null,
+
+                // 面试策略
+                interviewStrategy: aiData.interview_strategy || [],
+
+                // 核心优势
+                coreStrengths: aiData.core_strengths || [],
+
+                // 潜在差距
+                potentialGaps: aiData.potential_gaps || [],
+
+                // 原始AI响应（如果需要）
+                rawResponse: aiData.raw || null
+            },
+
+            // 完整文本（用于参考）
+            fullText: jobData.text || ""
+        };
+
+        // 转换为JSON字符串
+        const jsonString = JSON.stringify(exportData, null, 2);
+
+        // 生成文件名（格式：职位名_公司名_时间戳.json）
+        const timestamp = new Date().getTime();
+        const safeTitle = (jobData.detailTitle || "职位").replace(/[^\w\u4e00-\u9fa5]/g, '_').substring(0, 30);
+        const safeCompany = (jobData.company || "公司").replace(/[^\w\u4e00-\u9fa5]/g, '_').substring(0, 20);
+        const filename = `${safeTitle}_${safeCompany}_${timestamp}.json`;
+
+        // 创建Blob并下载
+        const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.style.display = 'none';
+
+        document.body.appendChild(link);
+        link.click();
+
+        // 清理
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        // 显示成功提示
+        showToast(`✅ 已导出: ${filename}`);
+
+        console.log("📥 [Export] 导出成功:", {
+            filename,
+            dataSize: `${jsonString.length} bytes`,
+            sections: Object.keys(exportData)
+        });
+
+    } catch (error) {
+        console.error("❌ [Export] 导出失败:", error);
+        showToast(`❌ 导出失败: ${error.message}`);
+    }
+}
+
+// ================= 报告渲染 =================
+
 function renderFullReport(jobData, aiData) {
     // Cache the latest analysis for one-click greeting
     window.lastGlimmerData = { jobData, aiData };
@@ -4104,6 +4242,28 @@ function renderFullReport(jobData, aiData) {
             <!-- 预留给后续 extraHtml 填充的容器 (Pain Box) -->
             <div id="pain-box" style="margin-top: 10px;"></div>
             ${chatSection ? chatSection.outerHTML : ''}
+
+            <!-- 导出按钮区域 -->
+            <div id="export-section" style="margin-top: 20px; padding: 16px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e0e0e0; display: flex; justify-content: center; align-items: center; gap: 12px;">
+                <button id="btn-export-json" style="
+                    background: linear-gradient(135deg, #00bebd 0%, #008988 100%);
+                    color: white;
+                    border: none;
+                    padding: 12px 24px;
+                    border-radius: 8px;
+                    font-size: 14px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    box-shadow: 0 4px 12px rgba(0, 190, 189, 0.3);
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    transition: all 0.3s ease;
+                " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 16px rgba(0, 190, 189, 0.4)';" onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 12px rgba(0, 190, 189, 0.3)';">
+                    <span>📥</span> 导出完整报告 (JSON)
+                </button>
+                <span style="font-size: 11px; color: #999;">包含职位详情、AI分析、风险评估等全部信息</span>
+            </div>
         `;
 
         // === 填充 Core Audit Desk Content ===
@@ -4402,6 +4562,15 @@ function renderFullReport(jobData, aiData) {
             // 4. Redemption Badge (Removed)
             if (redemptionBadge) {
                  redemptionBadge.style.display = 'none';
+            }
+
+            // 5. 绑定导出按钮事件 (Export Button)
+            const exportBtn = document.getElementById('btn-export-json');
+            if (exportBtn) {
+                exportBtn.onclick = () => {
+                    // 闭包保存 jobData 和 aiData
+                    exportReportToJSON(jobData, aiData);
+                };
             }
         }, 0);
     }
