@@ -91,9 +91,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // 监听普通 checkbox
     document.getElementById('filterActiveHr').addEventListener('change', saveSettings);
 
-    // 绑定批量导出倒计时按钮
-    document.getElementById('btn-start-timer').addEventListener('click', startExportTimer);
-    document.getElementById('btn-stop-timer').addEventListener('click', () => stopExportTimer(false)); 
+    // 绑定历史报告导出按钮
+    document.getElementById('btn-export-history').addEventListener('click', exportHistoryReports); 
     
     // 监听实验室模式
     document.getElementById('enableLabMode').addEventListener('change', (e) => {
@@ -751,131 +750,130 @@ function showStatus(msg, color) {
     setTimeout(() => { el.innerText = ''; el.style.color = 'var(--text-primary)'; }, 3000);
 }
 
-// ================= 批量导出倒计时功能 =================
+// ================= 历史报告导出功能 =================
 
-// 全局变量
-let exportTimer = null;
-let exportTimerInterval = null;
-let collectedReports = [];
-let timerSeconds = 0;
+// 导出指定时间范围内的历史报告
+function exportHistoryReports() {
+    const timeRangeSelect = document.getElementById('exportTimeRange');
+    const minutes = parseInt(timeRangeSelect.value);
+    const statusDiv = document.getElementById('export-status');
 
-// 开始倒计时
-function startExportTimer() {
-    const timerSelect = document.getElementById('exportTimer');
-    const minutes = parseInt(timerSelect.value);
-    timerSeconds = minutes * 60;
+    // 显示状态
+    statusDiv.style.display = 'block';
+    statusDiv.innerText = '正在查询历史记录...';
 
-    // 更新UI
-    document.getElementById('btn-start-timer').style.display = 'none';
-    document.getElementById('btn-stop-timer').style.display = 'inline-block';
-    document.getElementById('timer-status').style.display = 'block';
+    // 计算时间范围
+    const now = Date.now();
+    const timeRange = minutes * 60 * 1000; // 转换为毫秒
+    const startTime = now - timeRange;
 
-    // 清空之前的收集数据
-    collectedReports = [];
+    // 从chrome.storage读取历史记录
+    chrome.storage.local.get(['jobHistory'], (result) => {
+        const jobHistoryObj = result.jobHistory || {};
 
-    // 启动倒计时
-    updateTimerDisplay();
-    exportTimerInterval = setInterval(() => {
-        timerSeconds--;
-        updateTimerDisplay();
+        // 转换为数组并过滤时间范围
+        const filteredJobs = Object.entries(jobHistoryObj)
+            .filter(([jobId, record]) => {
+                return record.t >= startTime && record.t <= now;
+            })
+            .map(([jobId, record]) => ({
+                jobId,
+                timestamp: record.t,
+                score: record.s,
+                verdict: record.v
+            }));
 
-        if (timerSeconds <= 0) {
-            stopExportTimer(true);
+        if (filteredJobs.length === 0) {
+            statusDiv.innerText = `⚠️ 最近 ${minutes} 分钟内没有分析记录`;
+            statusDiv.style.color = '#ff9800';
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 3000);
+            return;
         }
-    }, 1000);
 
-    // 监听content script的消息，收集分析报告
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        if (message.action === 'reportGenerated' && message.data) {
-            collectedReports.push(message.data);
-            updateCollectedCount();
-        }
-    });
+        // 现在需要获取详细信息
+        const detailKeys = filteredJobs.map(job => `job_cache_${job.jobId}`);
 
-    showStatus(`⏱️ 倒计时已启动：${minutes}分钟`, '#00bebd');
-}
+        chrome.storage.local.get(detailKeys, (result) => {
+            const reports = [];
 
-// 停止倒计时并导出
-function stopExportTimer(autoExport = false) {
-    clearInterval(exportTimerInterval);
+            filteredJobs.forEach(job => {
+                const detail = result[`job_cache_${job.jobId}`];
+                if (detail && detail.jobData && detail.aiData) {
+                    reports.push({
+                        jobData: {
+                            title: detail.jobData.detailTitle,
+                            salary: detail.jobData.salary,
+                            company: detail.jobData.company,
+                            url: detail.jobData.url || window.location.href,
+                            analyzedAt: new Date(detail.timestamp).toLocaleString('zh-CN')
+                        },
+                        aiData: {
+                            score: detail.aiData.summary?.score || detail.aiData.score || 0,
+                            matchStatus: detail.aiData.summary?.match_status || '未知',
+                            riskLevel: detail.aiData.risk_assessment?.level || 'SAFE',
+                            summary: detail.aiData.summary?.verdict || ''
+                        }
+                    });
+                }
+            });
 
-    // 更新UI
-    document.getElementById('btn-start-timer').style.display = 'inline-block';
-    document.getElementById('btn-stop-timer').style.display = 'none';
-
-    if (autoExport) {
-        // 自动导出
-        exportCollectedReports();
-        showStatus(`✅ 倒计时结束，已导出 ${collectedReports.length} 份报告`, '#4CAF50');
-    } else {
-        // 手动停止，询问是否导出
-        if (collectedReports.length > 0) {
-            const confirmExport = confirm(`已收集 ${collectedReports.length} 份报告，是否立即导出？`);
-            if (confirmExport) {
-                exportCollectedReports();
+            if (reports.length === 0) {
+                statusDiv.innerText = `⚠️ 未找到详细信息`;
+                statusDiv.style.color = '#ff9800';
+                setTimeout(() => {
+                    statusDiv.style.display = 'none';
+                }, 3000);
+                return;
             }
-        } else {
-            showStatus('⚠️ 还没有收集到报告', '#ff9800');
-        }
-    }
 
-    // 重置倒计时显示
-    document.getElementById('timer-status').style.display = 'none';
-}
+            // 构建导出数据
+            const exportData = {
+                meta: {
+                    exportTime: new Date().toISOString(),
+                    exportTimeFormatted: new Date().toLocaleString('zh-CN'),
+                    pluginVersion: '3.1.0',
+                    pluginName: '微光·求职搭子',
+                    totalReports: reports.length,
+                    timeRange: `最近 ${minutes} 分钟`,
+                    timeStart: new Date(startTime).toLocaleString('zh-CN'),
+                    timeEnd: new Date(now).toLocaleString('zh-CN')
+                },
+                reports: reports
+            };
 
-// 更新倒计时显示
-function updateTimerDisplay() {
-    const minutes = Math.floor(timerSeconds / 60);
-    const seconds = timerSeconds % 60;
-    const display = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    document.getElementById('timer-countdown').innerText = display;
-}
+            // 转换为JSON
+            const jsonString = JSON.stringify(exportData, null, 2);
 
-// 更新收集数量
-function updateCollectedCount() {
-    document.getElementById('collected-count').innerText = collectedReports.length;
-}
+            // 生成文件名
+            const timestamp = now;
+            const timeRangeText = minutes >= 1440 ? '今天' : `${minutes}分钟`;
+            const filename = `微光历史报告_${timeRangeText}_${reports.length}份_${timestamp}.json`;
 
-// 导出收集的报告
-function exportCollectedReports() {
-    if (collectedReports.length === 0) {
-        showStatus('⚠️ 没有可导出的报告', '#ff9800');
-        return;
-    }
+            // 创建下载
+            const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            link.style.display = 'none';
 
-    // 构建导出数据
-    const exportData = {
-        meta: {
-            exportTime: new Date().toISOString(),
-            exportTimeFormatted: new Date().toLocaleString('zh-CN'),
-            pluginVersion: '3.1.0',
-            pluginName: '微光·求职搭子',
-            totalReports: collectedReports.length
-        },
-        reports: collectedReports
-    };
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
 
-    // 转换为JSON
-    const jsonString = JSON.stringify(exportData, null, 2);
+            // 显示成功状态
+            statusDiv.innerHTML = `✅ 已导出 <strong>${reports.length}</strong> 份报告<br><span style="font-size: 10px; color: #999;">时间范围：${timeRangeText}</span>`;
+            statusDiv.style.color = '#4CAF50';
 
-    // 生成文件名
-    const timestamp = new Date().getTime();
-    const filename = `微光批量导出_${collectedReports.length}份_${timestamp}.json`;
+            showStatus(`✅ 已导出 ${reports.length} 份报告`, '#4CAF50');
 
-    // 创建下载
-    const blob = new Blob([jsonString], { type: 'application/json;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.style.display = 'none';
-
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    // 清空收集
-    collectedReports = [];
-    updateCollectedCount();
+            // 5秒后隐藏状态
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 5000);
+        });
+    });
 }

@@ -1,0 +1,13 @@
+{
+  "browser": {
+    "browserName": "chromium",
+    "launchOptions": {
+      "channel": "chromium",
+      "headless": true,
+      "args": [
+        "--disable-extensions-except=F:/samlay-c/boss-agent",
+        "--load-extension=F:/samlay-c/boss-agent"
+      ]
+    }
+  }
+}

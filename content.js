@@ -3728,30 +3728,11 @@ function renderFullReport(jobData, aiData) {
     // Cache the latest analysis for one-click greeting
     window.lastGlimmerData = { jobData, aiData };
 
-    // 发送消息到popup，通知报告已生成（用于批量导出）
-    try {
-        chrome.runtime.sendMessage({
-            action: 'reportGenerated',
-            data: {
-                jobData: {
-                    title: jobData.detailTitle,
-                    salary: jobData.salary,
-                    company: jobData.company,
-                    url: window.location.href,
-                    timestamp: new Date().toISOString()
-                },
-                aiData: {
-                    score: aiData.summary?.score || aiData.score || 0,
-                    matchStatus: aiData.summary?.match_status || '未知',
-                    riskLevel: aiData.risk_assessment?.level || 'SAFE'
-                }
-            }
-        }).catch(err => {
-            // popup可能未打开，忽略错误
-            console.log("📥 [Export] Popup未打开，跳过报告收集");
-        });
-    } catch (e) {
-        // 忽略消息发送错误
+    // 保存到历史记录
+    const jobId = getJobId(window.location.href) || (jobData.link ? getJobId(jobData.link) : null);
+    if (jobId && HistoryManager) {
+        HistoryManager.saveAnalysis(jobId, jobData, aiData);
+        console.log(`💾 [History] 报告已保存到历史记录: ${jobId}`);
     }
 
     const autoApplyBtn = document.getElementById('btn-auto-apply');
