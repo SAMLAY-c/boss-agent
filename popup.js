@@ -92,7 +92,13 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('filterActiveHr').addEventListener('change', saveSettings);
 
     // 绑定历史报告导出按钮
-    document.getElementById('btn-export-history').addEventListener('click', exportHistoryReports); 
+    const exportBtn = document.getElementById('btn-export-history');
+    if (exportBtn) {
+        console.log('✅ [Init] 导出按钮已找到，绑定事件监听器');
+        exportBtn.addEventListener('click', exportHistoryReports);
+    } else {
+        console.error('❌ [Init] 导出按钮未找到！检查HTML中是否有 id="btn-export-history"');
+    } 
     
     // 监听实验室模式
     document.getElementById('enableLabMode').addEventListener('change', (e) => {
@@ -754,6 +760,7 @@ function showStatus(msg, color) {
 
 // 导出指定时间范围内的历史报告
 function exportHistoryReports() {
+    console.log('🚨🚨🚨 按钮被点击了！导出函数已执行！');
     console.log('═════════════════════════════════════════════════════');
     console.log('📥 [exportHistoryReports] 开始导出历史报告');
 
