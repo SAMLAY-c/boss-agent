@@ -1172,7 +1172,142 @@ function updateReportIdentityUI(data) {
     const identity = document.getElementById('ui-report-identity');
     if(identity) identity.innerHTML = html;
 }
+// ================= 2.5 职位描述解析器 (结构化提取) =================
 
+/**
+ * 解析职位描述，提取结构化信息
+ * @param {string} rawText - 原始职位描述文本（从 .job-sec-text 提取）
+ * @returns {object} - 结构化数据 {
+     responsibilities: [],  // 岗位职责列表
+     requirements: [],      // 任职要求列表
+     plusPoints: [],        // 加分项列表
+     aboutUs: "",           // 关于我们（文本）
+     other: ""             // 其他无法分类的内容
+ }
+ */
+function parseJobDescription(rawText) {
+    const result = {
+        responsibilities: [],
+        requirements: [],
+        plusPoints: [],
+        aboutUs: "",
+        other: ""
+    };
+
+    if (!rawText || typeof rawText !== 'string') {
+        return result;
+    }
+
+    // 预处理：移除HTML标签，统一换行符
+    const cleanText = rawText
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/?(div|p|h[1-6]|li)[^>]*>/gi, '\n')
+        .replace(/<[^>]+>/g, '') // 移除所有其他HTML标签
+        .replace(/&nbsp;/g, ' ')
+        .replace(/\\n/g, '\n')
+        .trim();
+
+    // 定义章节标题模式（按优先级排序）
+    const sectionPatterns = [
+        {
+            key: 'aboutUs',
+            regex: /^(?:四、)?关于我们|公司介绍|团队介绍|About Us|Company|我们是谁|团队信息/i,
+            isArray: false
+        },
+        {
+            key: 'plusPoints',
+            regex: /^(?:三、)?加分项|优先条件|Preferred|Nice to have|以下优先|具有以下者优先|优先考虑/i,
+            isArray: true
+        },
+        {
+            key: 'requirements',
+            regex: /^(?:二、)?任职要求|招聘要求|岗位要求|任职资格|我们需要|希望你|Requirements?|Qualifications?|我们需要你|岗位需求/i,
+            isArray: true
+        },
+        {
+            key: 'responsibilities',
+            regex: /^(?:一、)?岗位职责|工作内容|职位描述|主要职责|工作职责|你要做|你将负责|What you'll do|工作内容/i,
+            isArray: true
+        }
+    ];
+
+    // 拆分文本为行
+    const lines = cleanText.split('\n').map(line => line.trim()).filter(line => line);
+
+    let currentSection = null;
+    let currentContent = [];
+
+    // 第一遍：识别章节分界点
+    const sectionIndices = [];
+    lines.forEach((line, index) => {
+        for (const pattern of sectionPatterns) {
+            if (pattern.regex.test(line)) {
+                sectionIndices.push({ index, key: pattern.key, isArray: pattern.isArray });
+                break;
+            }
+        }
+    });
+
+    // 按索引排序
+    sectionIndices.sort((a, b) => a.index - b.index);
+
+    // 如果没有找到任何章节，返回原始文本作为"其他"
+    if (sectionIndices.length === 0) {
+        result.other = cleanText;
+        return result;
+    }
+
+    // 第二遍：提取各章节内容
+    for (let i = 0; i < sectionIndices.length; i++) {
+        const current = sectionIndices[i];
+        const next = sectionIndices[i + 1];
+
+        const startIndex = current.index + 1; // 跳过章节标题行
+        const endIndex = next ? next.index : lines.length;
+
+        const sectionLines = lines.slice(startIndex, endIndex).filter(line => {
+            // 过滤掉空行和子标题
+            return line && !line.match(/^\d+[、．.]/);
+        });
+
+        if (current.isArray) {
+            // 数组类型：按 bullet 点或序号拆分
+            const items = [];
+            let tempItem = "";
+
+            sectionLines.forEach(line => {
+                // 检测是否是新的列表项（以数字、符号开头）
+                if (line.match(/^[\d\-\•\●\○\*\①②③④⑤⑥⑦⑧⑨⑩]/)) {
+                    if (tempItem) items.push(tempItem.trim());
+                    tempItem = line;
+                } else if (line.match(/^[一二三四五六七八九十]+[、．]/)) {
+                    // 中文章节标记，跳过
+                    return;
+                } else {
+                    // 续行
+                    tempItem += (tempItem ? " " : "") + line;
+                }
+            });
+
+            if (tempItem) items.push(tempItem.trim());
+
+            result[current.key] = items.filter(item => item.length > 2);
+        } else {
+            // 文本类型：合并所有行
+            result[current.key] = sectionLines.join(' ').replace(/\s+/g, ' ');
+        }
+    }
+
+    // 提取第一个章节之前的内容（可能是职位概述）
+    if (sectionIndices[0] && sectionIndices[0].index > 0) {
+        const introLines = lines.slice(0, sectionIndices[0].index);
+        if (introLines.length > 0) {
+            result.other = introLines.join('\n');
+        }
+    }
+
+    return result;
+}
 
 // ================= 3. 数据抓取 (唯一真理：右侧详情页) =================
 
@@ -1192,6 +1327,10 @@ function getDetailData() {
 
     // 1. 正文
     const text = findInDetail(['.job-detail-body', '.job-sec-text', '.text-container']);
+
+    // 1.5 结构化解析职位描述（新增）
+    const parsedDesc = parseJobDescription(text);
+    console.log("📋 [JobParser] 结构化解析结果:", parsedDesc);
     
     // 2. 标题 (各种结构兼容)
     let detailTitle = findInDetail([
@@ -1379,7 +1518,26 @@ function getDetailData() {
     if (!detailTitle) detailTitle = "职位读取中"; // 占位符
 
     // 4. 组装更丰富的 Job Text (Context-Aware)
-    // 我们不仅仅发送职位描述，还发送这些元数据，以便 Prompt 进行“猎头式”推理
+    // 我们不仅仅发送职位描述，还发送这些元数据，以便 Prompt 进行"猎头式"推理
+
+    // 4.1 构建结构化的职位描述文本
+    let structuredDesc = "";
+    if (parsedDesc.responsibilities.length > 0) {
+        structuredDesc += "\n【岗位职责】\n" + parsedDesc.responsibilities.map((item, i) => `${i + 1}. ${item}`).join('\n') + "\n";
+    }
+    if (parsedDesc.requirements.length > 0) {
+        structuredDesc += "\n【任职要求】\n" + parsedDesc.requirements.map((item, i) => `${i + 1}. ${item}`).join('\n') + "\n";
+    }
+    if (parsedDesc.plusPoints.length > 0) {
+        structuredDesc += "\n【加分项】\n" + parsedDesc.plusPoints.map((item, i) => `${i + 1}. ${item}`).join('\n') + "\n";
+    }
+    if (parsedDesc.aboutUs) {
+        structuredDesc += "\n【关于我们】\n" + parsedDesc.aboutUs + "\n";
+    }
+    if (parsedDesc.other) {
+        structuredDesc += "\n【其他信息】\n" + parsedDesc.other + "\n";
+    }
+
     const fullJobText = `
 【职位分析元数据】
 - 职位名称：${detailTitle}
@@ -1388,21 +1546,29 @@ function getDetailData() {
 - 公司背景：${companyName} [${companyTags}]
 - 福利标签：${jobTags}
 
-【职位描述正文 (可能是复制粘贴的，请甄别)】：
-${text}
+【职位描述正文 (结构化解析)】
+${structuredDesc || text}
     `;
 
-    return { 
+    return {
         text: fullJobText, // 替换原始文本
-        detailTitle, 
-        salary, 
-        company: companyName || "公司", 
-        hr: hrName || "HR", 
+        detailTitle,
+        salary,
+        company: companyName || "公司",
+        hr: hrName || "HR",
         active: activeTime || "",
         hrTitle,
         companyTags,
         jobTags,
-        rawDesc: text // 保留原始描述备用
+        rawDesc: text, // 保留原始描述备用
+        // 新增：结构化数据
+        parsed: {
+            responsibilities: parsedDesc.responsibilities,
+            requirements: parsedDesc.requirements,
+            plusPoints: parsedDesc.plusPoints,
+            aboutUs: parsedDesc.aboutUs,
+            other: parsedDesc.other
+        }
     };
 }
 
@@ -3483,6 +3649,86 @@ function renderFullReport(jobData, aiData) {
         score = Math.floor(score * 0.8); // 中风险扣分 20%
     }
 
+    // === 新增：结构化职位信息展示 (Job Details Section) ===
+    let jobDetailsHtml = '';
+    if (jobData && jobData.parsed) {
+        const parsed = jobData.parsed;
+        const hasContent = parsed.responsibilities.length > 0 ||
+                          parsed.requirements.length > 0 ||
+                          parsed.plusPoints.length > 0 ||
+                          parsed.aboutUs;
+
+        if (hasContent) {
+            jobDetailsHtml = `
+                <div id="job-details-section" style="background:#fff; border:1px solid var(--border-light); border-radius:var(--radius-md); padding:16px; margin-bottom:15px; box-shadow:var(--shadow-sm);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding-bottom:10px; border-bottom:1px dashed rgba(0,0,0,0.08);">
+                        <div style="font-size:13px; color:var(--text-secondary); font-weight:800; display:flex; align-items:center; gap:6px;">
+                            <span>📋</span> 职位详情 (JD DETAILS)
+                        </div>
+                        <button onclick="this.parentElement.parentElement.querySelector('.job-details-content').style.display = this.parentElement.parentElement.querySelector('.job-details-content').style.display === 'none' ? 'block' : 'none'; this.innerText = this.innerText === '▼' ? '▲' : '▼';" style="background:none; border:none; color:#00bebd; font-size:16px; cursor:pointer; padding:4px 8px; font-weight:bold;" title="点击展开/收起">▲</button>
+                    </div>
+
+                    <div class="job-details-content" style="display:block;">
+                        ${parsed.responsibilities.length > 0 ? `
+                        <div style="margin-bottom:14px;">
+                            <div style="font-size:11px; color:#00bebd; font-weight:700; margin-bottom:6px; display:flex; align-items:center;">
+                                <span style="margin-right:4px;">🎯</span> 岗位职责
+                            </div>
+                            <div style="font-size:12px; color:#455a64; line-height:1.6; padding-left:16px;">
+                                ${parsed.responsibilities.map((item, i) => `<div style="margin-bottom:4px;">${i + 1}. ${item}</div>`).join('')}
+                            </div>
+                        </div>
+                        ` : ''}
+
+                        ${parsed.requirements.length > 0 ? `
+                        <div style="margin-bottom:14px;">
+                            <div style="font-size:11px; color:#ff9800; font-weight:700; margin-bottom:6px; display:flex; align-items:center;">
+                                <span style="margin-right:4px;">📌</span> 任职要求
+                            </div>
+                            <div style="font-size:12px; color:#455a64; line-height:1.6; padding-left:16px;">
+                                ${parsed.requirements.map((item, i) => `<div style="margin-bottom:4px;">${i + 1}. ${item}</div>`).join('')}
+                            </div>
+                        </div>
+                        ` : ''}
+
+                        ${parsed.plusPoints.length > 0 ? `
+                        <div style="margin-bottom:14px;">
+                            <div style="font-size:11px; color:#7e57c2; font-weight:700; margin-bottom:6px; display:flex; align-items:center;">
+                                <span style="margin-right:4px;">⭐</span> 加分项
+                            </div>
+                            <div style="font-size:12px; color:#455a64; line-height:1.6; padding-left:16px;">
+                                ${parsed.plusPoints.map((item, i) => `<div style="margin-bottom:4px;">${i + 1}. ${item}</div>`).join('')}
+                            </div>
+                        </div>
+                        ` : ''}
+
+                        ${parsed.aboutUs ? `
+                        <div style="margin-bottom:14px;">
+                            <div style="font-size:11px; color:#26a69a; font-weight:700; margin-bottom:6px; display:flex; align-items:center;">
+                                <span style="margin-right:4px;">🏢</span> 关于我们
+                            </div>
+                            <div style="font-size:12px; color:#455a64; line-height:1.6; padding-left:16px; background:#f5f5f5; padding:10px; border-radius:4px;">
+                                ${parsed.aboutUs}
+                            </div>
+                        </div>
+                        ` : ''}
+
+                        ${parsed.other ? `
+                        <div style="margin-bottom:8px;">
+                            <div style="font-size:11px; color:#90a4ae; font-weight:700; margin-bottom:6px; display:flex; align-items:center;">
+                                <span style="margin-right:4px;">📄</span> 其他信息
+                            </div>
+                            <div style="font-size:12px; color:#455a64; line-height:1.6; padding-left:16px; font-style:italic;">
+                                ${parsed.other}
+                            </div>
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        }
+    }
+
     // === 新增：渲染雷达图 + 战术卡片 (Tactical Dashboard) ===
     const radarData = getVal('radar_values', getVal('radar_chart', null));
     const motive = getVal('hiring_motive', null);
@@ -3852,6 +4098,7 @@ function renderFullReport(jobData, aiData) {
         container.innerHTML = `
             ${identityEl ? identityEl.outerHTML : ''}
             ${scoreSectionHtml}
+            ${jobDetailsHtml}
             ${safeRadarHtml}
             ${dividerHtml}
             <!-- 预留给后续 extraHtml 填充的容器 (Pain Box) -->
